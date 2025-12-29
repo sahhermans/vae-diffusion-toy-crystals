@@ -1,0 +1,42 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyd
+*.so
+*.egg-info/
+dist/
+build/
+
+# Environments
+.venv/
+venv/
+env/
+.conda/
+
+# Tool caches
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.ipynb_checkpoints/
+
+# IDEs
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Project outputs
+checkpoints/
+results/
+artifacts/
+
+# Large model files
+*.pt
+*.pth
+*.ckpt
+*.onnx
+
+# Logs
+*.log
