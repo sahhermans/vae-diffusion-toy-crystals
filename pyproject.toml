@@ -1,0 +1,32 @@
+[build-system]
+requires = ["hatchling>=1.21.0"]
+build-backend = "hatchling.build"
+
+[project]
+name = "toycrystals-vae-diffusion"
+version = "0.1.0"
+description = "Conditional VAE + latent diffusion prior on a synthetic toy-crystals dataset."
+readme = "README.md"
+requires-python = ">=3.10"
+license = { file = "LICENSE" }
+authors = [{ name = "S.A.H. Hermans" }]
+dependencies = [
+  "numpy>=1.24",
+  "matplotlib>=3.7",
+  "tqdm>=4.66",
+  "pillow>=10.0",
+]
+
+
+[project.optional-dependencies]
+dev = [
+  "ruff>=0.6",
+  "pytest>=8.0",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/toycrystals"]
