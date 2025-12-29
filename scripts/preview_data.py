@@ -14,9 +14,9 @@ def main() -> int:
     fig, axes = plt.subplots(rows, cols, figsize=(6, 6))
 
     for i, ax in enumerate(axes.flat):
-        sample = ds[i]
-        ax.imshow(sample.x[0], cmap="gray", vmin=0.0, vmax=1.0)
-        ax.set_title(f"type={int(sample.y_cat.item())}", fontsize=8)
+        x, y_cat, y_cont = ds[i]
+        ax.imshow(x[0], cmap="gray", vmin=0.0, vmax=1.0)
+        ax.set_title(f"type={int(y_cat.item())}", fontsize=8)
         ax.axis("off")
 
     fig.tight_layout()

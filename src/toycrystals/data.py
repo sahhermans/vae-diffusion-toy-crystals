@@ -1,25 +1,10 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
 import math
 from typing import Tuple
 
 import torch
 from torch.utils.data import Dataset
-
-
-@dataclass(frozen=True)
-class ToyCrystalSample:
-    """
-    One synthetic sample.
-
-    x:      image tensor [1, H, W] in [0, 1]
-    y_cat:  lattice type as int64 scalar (0..3)
-    y_cont: continuous conditions [a, theta, vacancy, jitter]
-    """
-    x: torch.Tensor
-    y_cat: torch.Tensor
-    y_cont: torch.Tensor
 
 
 def _uniform(g: torch.Generator, low: float, high: float) -> float:
@@ -67,6 +52,8 @@ def _lattice_definition(
         basis = torch.tensor([[0.0, 0.0]], dtype=torch.float32)
 
     elif lattice_type == 3:  # honeycomb: triangular lattice with 2-point basis
+                             # Current approach leads to different atom densities 
+                             # than other lattice types. Address later if needed.
         v1 = torch.tensor([a, 0.0], dtype=torch.float32)
         v2 = torch.tensor([0.5 * a, (math.sqrt(3) / 2.0) * a], dtype=torch.float32)
         basis = torch.tensor(
@@ -177,7 +164,7 @@ class ToyCrystalsDataset(Dataset):
     def __len__(self) -> int:
         return self.n_samples
 
-    def __getitem__(self, idx: int) -> ToyCrystalSample:
+    def __getitem__(self, idx: int) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         g = torch.Generator()
         g.manual_seed(self.seed + int(idx))
 
@@ -212,4 +199,4 @@ class ToyCrystalsDataset(Dataset):
         y_cat = torch.tensor(lattice_type, dtype=torch.int64)
         y_cont = torch.tensor([a, theta, vacancy, jitter], dtype=torch.float32)
 
-        return ToyCrystalSample(x=x, y_cat=y_cat, y_cont=y_cont)
+        return x, y_cat, y_cont
