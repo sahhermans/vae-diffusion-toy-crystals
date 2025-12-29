@@ -31,6 +31,7 @@ Thumbs.db
 checkpoints/
 results/
 artifacts/
+data/
 
 # Large model files
 *.pt
