@@ -26,6 +26,7 @@ python -m pip install -e ".[dev]"
 # Simple uncond results made with
 ```bash
 python scripts/train_vae.py --uncond --beta 0.0005 --z-dim 16 --epochs 15 --data-path data/toycrystals_train_simple.pt
+```
 
 # Simple cond results made with
 ```bash
