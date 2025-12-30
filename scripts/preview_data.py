@@ -8,7 +8,7 @@ from toycrystals.data import ToyCrystalsDataset
 def main() -> int:
     os.makedirs("results", exist_ok=True)
 
-    ds = ToyCrystalsDataset(n_samples=10_000, img_size=64, seed=0)
+    ds = ToyCrystalsDataset(n_samples=10_000, img_size=64, seed=0, n_types=4, simple=False)
 
     rows, cols = 6, 6
     fig, axes = plt.subplots(rows, cols, figsize=(6, 6))

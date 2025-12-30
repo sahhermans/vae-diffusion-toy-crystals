@@ -11,10 +11,23 @@ from toycrystals.data import ToyCrystalsDataset
 from toycrystals.models.vae import CondVAE, VAE
 
 
-def kl_divergence(mu: torch.Tensor, logvar: torch.Tensor) -> torch.Tensor:
-    # KL(q(z|x,y) || N(0,I)) for diagonal Gaussians; mean over batch
-    kl = -0.5 * torch.sum(1.0 + logvar - mu.pow(2) - logvar.exp(), dim=1)
-    return kl.mean()
+def kl_stats(mu: torch.Tensor, logvar: torch.Tensor, free_bits: float = 0.0) -> tuple[torch.Tensor, torch.Tensor]:
+    """
+    Returns (kl_used_for_loss, kl_raw), both averaged over batch.
+    free_bits is in nats per latent dimension.
+    """
+    # [B, z_dim]
+    kl_dim = 0.5 * (mu.pow(2) + logvar.exp() - 1.0 - logvar)
+
+    kl_raw = kl_dim.sum(dim=1).mean()
+
+    if free_bits > 0.0:
+        fb = torch.tensor(free_bits, device=kl_dim.device, dtype=kl_dim.dtype)
+        kl_used = torch.maximum(kl_dim, fb).sum(dim=1).mean()
+    else:
+        kl_used = kl_raw
+
+    return kl_used, kl_raw
 
 
 @torch.no_grad()
@@ -68,9 +81,9 @@ def save_prior_samples(model: CondVAE, out_path: str, device: torch.device, unco
         y_cat = torch.tensor([i % model.n_types for i in range(n)], device=device, dtype=torch.int64)
 
         # Fixed continuous conditions (mid-range)
-        y_cont = torch.tensor(
-            [[10.0, 0.0, 0.10, 0.20]] * n, device=device, dtype=torch.float32
-        )  # [a, theta, vacancy, jitter]
+        thetas = torch.linspace(0.0, 1.0, steps=n, device=device)  # adjust max as needed
+        y_cont = torch.zeros((n, 4), device=device)
+        y_cont[:, 1] = thetas
 
         x = model.decode(z, y_cat, y_cont)  
 
@@ -94,17 +107,18 @@ def main() -> int:
     p.add_argument("--batch-size", type=int, default=128)
     p.add_argument("--epochs", type=int, default=15)
     p.add_argument("--lr", type=float, default=2e-3)
-    p.add_argument("--z-dim", type=int, default=16)
+    p.add_argument("--z-dim", type=int, default=32)
     p.add_argument("--n-types", type=int, default=4)
     p.add_argument("--y-cont-dim", type=int, default=4)
-    p.add_argument("--beta", type=float, default=0.001)
+    p.add_argument("--beta", type=float, default=0.0003)
     p.add_argument("--device", type=str, default="cuda")  # "cuda" or "cpu"
     p.add_argument("--num-workers", type=int, default=0)  # keep 0 on Windows unless you want to tune it
-    p.add_argument("--data-path", type=str, default="data/toycrystals_train_simple.pt")
+    p.add_argument("--data-path", type=str, default="data/toycrystals_train_rotonly.pt")
     p.add_argument("--cond-drop", type=float, default=0.0)
     p.add_argument("--uncond", dest="uncond", action="store_true", help="Train unconditional VAE.")
     p.add_argument("--cond", dest="uncond", action="store_false", help="Train conditional VAE.")
-    p.set_defaults(uncond=True)
+    p.add_argument("--free-bits", type=float, default=0.05, help="Free bits threshold in nats per latent dim (0 disables).")
+    p.set_defaults(uncond=False)
     args = p.parse_args()
 
     torch.manual_seed(args.seed)
@@ -136,6 +150,7 @@ def main() -> int:
     if args.uncond:
         model = VAE(z_dim=args.z_dim).to(device)
     else:
+        print("Training conditional VAE")
         model = CondVAE(z_dim=args.z_dim, 
                         n_types=args.n_types, 
                         y_cont_dim=args.y_cont_dim, 
@@ -147,6 +162,7 @@ def main() -> int:
     loss_hist = []
     recon_hist = []
     kl_hist = []
+    klr_hist = []
 
     print("starting training loop...")
     if torch.cuda.is_available():
@@ -157,6 +173,7 @@ def main() -> int:
         total_loss = 0.0
         total_recon = 0.0
         total_kl = 0.0
+        total_klr = 0.0
 
         for x, y_cat, y_cont in dl:
             x = x.to(device)
@@ -169,9 +186,9 @@ def main() -> int:
                 x_hat, mu, logvar = model(x, y_cat, y_cont)
 
             recon = torch.mean((x_hat - x) ** 2)
-            kl = kl_divergence(mu, logvar)
-            beta = args.beta * min(1.0, (epoch + 1) / 5.0)  # warm up over 5 epochs
-            loss = recon + beta * kl
+            kl_used, kl_raw = kl_stats(mu, logvar, free_bits=args.free_bits)
+            beta = args.beta * min(1.0, (epoch + 1) / 5.0)
+            loss = recon + beta * kl_used
 
             opt.zero_grad(set_to_none=True)
             loss.backward()
@@ -179,16 +196,19 @@ def main() -> int:
 
             total_loss += float(loss.item())
             total_recon += float(recon.item())
-            total_kl += float(kl.item())
+            total_kl += float(kl_used.item())
+            total_klr += float(kl_raw.item())
 
         n_batches = len(dl)
         avg_loss = total_loss / n_batches
         avg_recon = total_recon / n_batches
         avg_kl = total_kl / n_batches
+        avg_klr = total_klr / n_batches
 
         loss_hist.append(avg_loss)
         recon_hist.append(avg_recon)
         kl_hist.append(avg_kl)
+        klr_hist.append(avg_klr)
 
         print(f"epoch {epoch+1:02d}/{args.epochs} loss={avg_loss:.4f} recon={avg_recon:.4f} kl={avg_kl:.6f}")
 

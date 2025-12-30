@@ -11,18 +11,19 @@ from toycrystals.data import ToyCrystalsDataset
 
 def main() -> int:
     p = argparse.ArgumentParser()
-    p.add_argument("--out", type=str, default="data/toycrystals_train_simple.pt")
+    p.add_argument("--out", type=str, default="data/toycrystals_train_rotonly.pt")
     p.add_argument("--n-samples", type=int, default=50_000)
     p.add_argument("--img-size", type=int, default=64)
     p.add_argument("--seed", type=int, default=0)
-    p.add_argument("--n-types", type=int, default=3)
-    p.add_argument("--simple", default=True, action="store_true")
+    p.add_argument("--n-types", type=int, default=4)
+    p.add_argument("--simple", default=False, action="store_true")
+    p.add_argument("--rot-only", default=True, action="store_true")
     args = p.parse_args()
 
     out_path = Path(args.out)
     os.makedirs(out_path.parent, exist_ok=True)
 
-    ds = ToyCrystalsDataset(n_samples=args.n_samples, img_size=args.img_size, seed=args.seed, n_types=args.n_types, simple=args.simple)
+    ds = ToyCrystalsDataset(n_samples=args.n_samples, img_size=args.img_size, seed=args.seed, n_types=args.n_types, simple=args.simple, rot_only=args.rot_only)
 
     x_u8 = torch.empty((args.n_samples, 1, args.img_size, args.img_size), dtype=torch.uint8)
     y_cat = torch.empty((args.n_samples,), dtype=torch.int64)

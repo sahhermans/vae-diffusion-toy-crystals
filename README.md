@@ -23,7 +23,16 @@ python -m pip install -e ".[dev]"
 
 
 
-# Simple results made with
+# Simple uncond results made with
 ```bash
-python scripts/train_vae.py --uncond --beta 0.001 --z-dim 16 --epochs 15 --data-path data/toycrystals_train_simple.pt
+python scripts/train_vae.py --uncond --beta 0.0005 --z-dim 16 --epochs 15 --data-path data/toycrystals_train_simple.pt
 
+# Simple cond results made with
+```bash
+python scripts/train_vae.py --cond --beta 0.0005 --z-dim 32 --epochs 15  --free-bits 0.02 --data-path data/toycrystals_train_simple.pt
+```
+
+# Cond rotonly results made with
+```bash
+python scripts/train_vae.py --cond --beta 0.0003 --z-dim 32 --epochs 15  --free-bits 0.05 --data-path data/toycrystals_train_rotonly.pt
+```

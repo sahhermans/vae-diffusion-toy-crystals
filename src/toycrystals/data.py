@@ -156,12 +156,13 @@ class ToyCrystalsDataset(Dataset):
 
     Each item is deterministically generated from (seed + idx), so no files are needed.
     """
-    def __init__(self, n_samples: int = 50_000, img_size: int = 64, seed: int = 0, n_types: int = 4, simple: bool = False) -> None:
+    def __init__(self, n_samples: int = 50_000, img_size: int = 64, seed: int = 0, n_types: int = 4, simple: bool = False, rot_only: bool = False) -> None:
         self.n_samples = int(n_samples)
         self.img_size = int(img_size)
         self.seed = int(seed)
         self.n_types: int = n_types
         self.simple: bool = simple
+        self.rot_only: bool = rot_only
 
     def __len__(self) -> int:
         return self.n_samples
@@ -181,6 +182,11 @@ class ToyCrystalsDataset(Dataset):
         if self.simple:
             a = 10.0
             theta = 0.0
+            vacancy = 0.0
+            jitter = 0.0
+
+        if self.rot_only:
+            a = 10.0
             vacancy = 0.0
             jitter = 0.0
 
@@ -205,6 +211,11 @@ class ToyCrystalsDataset(Dataset):
 
         x = img[None, :, :].to(dtype=torch.float32)  # [1,H,W]
         y_cat = torch.tensor(lattice_type, dtype=torch.int64)
-        y_cont = torch.zeros(4, dtype=torch.float32) if self.simple else torch.tensor([a, theta, vacancy, jitter], dtype=torch.float32)
+        if self.simple:
+            y_cont = torch.zeros(4, dtype=torch.float32)
+        elif self.rot_only:
+            y_cont = torch.tensor([0.0, theta, 0.0, 0.0], dtype=torch.float32)
+        else:
+            y_cont = torch.tensor([a, theta, vacancy, jitter], dtype=torch.float32)
 
         return x, y_cat, y_cont
