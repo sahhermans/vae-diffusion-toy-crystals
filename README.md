@@ -25,5 +25,5 @@ python -m pip install -e ".[dev]"
 
 # Simple results made with
 ```bash
-python scripts/train_vae.py --uncond --beta 0.001 --z-dim 32 --epochs 15 --data-path data/toycrystals_train_simple.pt
+python scripts/train_vae.py --uncond --beta 0.001 --z-dim 16 --epochs 15 --data-path data/toycrystals_train_simple.pt
 
