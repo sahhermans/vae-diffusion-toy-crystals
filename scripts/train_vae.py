@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+from typing import Optional
+import math
+
 import argparse
 import os
 
@@ -11,7 +14,10 @@ from toycrystals.data import ToyCrystalsDataset
 from toycrystals.models.vae import CondVAE, VAE
 
 
-def kl_stats(mu: torch.Tensor, logvar: torch.Tensor, free_bits: float = 0.0) -> tuple[torch.Tensor, torch.Tensor]:
+def kl_stats(mu: torch.Tensor, 
+             logvar: torch.Tensor, 
+             free_bits: float = 0.0
+) -> tuple[torch.Tensor, torch.Tensor]:
     """
     Returns (kl_used_for_loss, kl_raw), both averaged over batch.
     free_bits is in nats per latent dimension.
@@ -68,7 +74,12 @@ def save_recon_grid(
 
 
 @torch.no_grad()
-def save_prior_samples(model: CondVAE, out_path: str, device: torch.device, uncond: bool) -> None:
+def save_prior_samples(model: CondVAE, 
+                       out_path: str, 
+                       device: torch.device, 
+                       uncond: bool, 
+                       theta_max: float = math.pi / 3.0
+) -> None:
     model.eval()
 
     n = 36
@@ -80,9 +91,10 @@ def save_prior_samples(model: CondVAE, out_path: str, device: torch.device, unco
         # Cycle lattice types for a mixed grid
         y_cat = torch.tensor([i % model.n_types for i in range(n)], device=device, dtype=torch.int64)
 
-        # Fixed continuous conditions (mid-range)
-        thetas = torch.linspace(0.0, 1.0, steps=n, device=device)  # adjust max as needed
+        thetas = torch.linspace(0.0, theta_max, steps=n, device=device)  # adjust max as needed
         y_cont = torch.zeros((n, 4), device=device)
+        if model.y_cont_dim <= 1:
+            raise ValueError("Expected y_cont to have theta at index 1.")
         y_cont[:, 1] = thetas
 
         x = model.decode(z, y_cat, y_cont)  
@@ -92,6 +104,115 @@ def save_prior_samples(model: CondVAE, out_path: str, device: torch.device, unco
         ax.imshow(x[i, 0].cpu(), cmap="gray", vmin=0.0, vmax=1.0)
         if not uncond:
             ax.set_title(f"t={int(y_cat[i].item())}", fontsize=7)
+        ax.axis("off")
+
+    fig.tight_layout()
+    fig.savefig(out_path, dpi=200)
+    plt.close(fig)
+
+
+
+@torch.no_grad()
+def save_mop_samples(
+    model: CondVAE,
+    dl: DataLoader,
+    out_path: str,
+    device: torch.device,
+    uncond: bool,
+    pool_size: int = 4096,
+    theta_max: float = math.pi / 3.0,
+    decode_with_target: bool = True,
+) -> None:
+    """
+    Mixture-of-posteriors sampling baseline.
+
+    For each target condition (lattice type, theta) on a fixed grid:
+      - pick a real example from a candidate pool with same type and nearest theta
+      - encode it -> (mu, logvar)
+      - sample z ~ N(mu, sigma^2) via reparameterise
+      - decode using either the target condition (decode_with_target=True) or the matched example's condition
+    """
+    model.eval()
+
+    n = 36
+
+    # Build the same "fixed condition" grid as save_prior_samples
+    if uncond:
+        # (no conditioning.)
+        pass
+    else:
+        y_target_cat = torch.tensor([i % model.n_types for i in range(n)], device=device, dtype=torch.int64)
+        thetas = torch.linspace(0.0, theta_max, steps=n, device=device)
+        y_target_cont = torch.zeros((n, model.y_cont_dim), device=device)
+        y_target_cont[:, 1] = thetas
+
+    # --- collect a candidate pool from the dataloader (on device) ---
+    xs, ycats, yconts = [], [], []
+    seen = 0
+    for x, y_cat, y_cont in dl:
+        xs.append(x)
+        ycats.append(y_cat)
+        yconts.append(y_cont)
+        seen += x.shape[0]
+        if seen >= pool_size:
+            break
+
+    x_pool = torch.cat(xs, dim=0)[:pool_size].to(device)
+    ycat_pool = torch.cat(ycats, dim=0)[:pool_size].to(device)
+    ycont_pool = torch.cat(yconts, dim=0)[:pool_size].to(device)
+
+    if uncond:
+        # pick n random items from the pool
+        idx = torch.randint(0, x_pool.shape[0], (n,), device=device)
+        x_sel = x_pool[idx]
+
+        mu, logvar = model.encode(x_sel)
+        z = model.reparameterise(mu, logvar)
+        x_gen = model.decode(z)
+
+    else:
+        # For each target cell, find nearest in pool with same type and closest theta
+        idxs = []
+        for i in range(n):
+            t = y_target_cat[i]
+            theta_t = y_target_cont[i, 1]
+
+            mask = (ycat_pool == t)
+            if not torch.any(mask):
+                # fallback: pick any random index (should not happen with decent pool_size)
+                idxs.append(int(torch.randint(0, x_pool.shape[0], (1,), device=device).item()))
+                continue
+
+            pool_idxs = torch.nonzero(mask, as_tuple=False).squeeze(1)
+            dtheta = (ycont_pool[pool_idxs, 1] - theta_t).abs()
+            best_local = int(torch.argmin(dtheta).item())
+            idxs.append(int(pool_idxs[best_local].item()))
+
+        idx = torch.tensor(idxs, device=device, dtype=torch.long)
+
+        x_sel = x_pool[idx]
+        y_sel_cat = ycat_pool[idx]
+        y_sel_cont = ycont_pool[idx]
+
+        # Sample z from q(z|x_sel, y_sel)
+        mu, logvar = model.encode(x_sel, y_sel_cat, y_sel_cont)
+        z = model.reparameterise(mu, logvar)
+
+        # Decode either with the fixed target condition (for a true fixed grid),
+        # or with the matched example condition (slightly more self-consistent).
+        if decode_with_target:
+            x_gen = model.decode(z, y_target_cat, y_target_cont)
+            y_show = y_target_cat
+        else:
+            x_gen = model.decode(z, y_sel_cat, y_sel_cont)
+            y_show = y_sel_cat
+
+    # --- plot ---
+    fig, axes = plt.subplots(6, 6, figsize=(6, 6))
+    for i, ax in enumerate(axes.flat):
+        ax.imshow(x_gen[i, 0].cpu(), cmap="gray", vmin=0.0, vmax=1.0)
+        if not uncond:
+            ax.set_title(f"t={int(y_show[i].item())}", fontsize=7)
         ax.axis("off")
 
     fig.tight_layout()
@@ -222,6 +343,8 @@ def main() -> int:
 
     save_recon_grid(model, x0, y0_cat, y0_cont, "results/vae_recon.png", uncond=args.uncond)
     save_prior_samples(model, "results/vae_samples_prior.png", device=device, uncond=args.uncond)
+
+    save_mop_samples(model, dl, "results/vae_samples_mop.png", device=device, uncond=args.uncond, pool_size=4096, decode_with_target=True)
 
     # Loss curves
     fig = plt.figure(figsize=(5, 3))
