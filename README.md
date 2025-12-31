@@ -65,6 +65,8 @@ pip install torch
 # install this package
 pip install -e .
 ```
+
+## Quickstart
 ```
 # 1) (optional) preview on-the-fly data
 python scripts/preview_data.py
@@ -73,8 +75,8 @@ python scripts/preview_data.py
 python scripts/build_dataset.py --out data/toycrystals_train_rotonly.pt --n-samples 50000 --img-size 64 --n-types 4
 
 # 3) train the (conditional) VAE (use --uncond for an unconditional baseline)
-python scripts/train_vae.py --data-path data/toycrystals_train_rotonly.pt --epochs 15
+python scripts/train_vae.py --data-path data/toycrystals_train_rotonly.pt --epochs 25
 
 # 4) train the latent diffusion prior and sample (decoded through the VAE)
-python scripts/train_diffusion_prior.py --epochs 600
+python scripts/train_diffusion_prior.py --epochs 200
 ```
