@@ -32,6 +32,8 @@ checkpoints/
 results/
 artifacts/
 data/
+assets/simple_cond
+assets/simple_uncond
 
 # Large model files
 *.pt
