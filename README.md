@@ -65,7 +65,7 @@ pip install torch
 # install this package
 pip install -e .
 ```
-
+```
 # 1) (optional) preview on-the-fly data
 python scripts/preview_data.py
 
@@ -77,3 +77,4 @@ python scripts/train_vae.py --data-path data/toycrystals_train_rotonly.pt --epoc
 
 # 4) train the latent diffusion prior and sample (decoded through the VAE)
 python scripts/train_diffusion_prior.py --epochs 600
+```
