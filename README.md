@@ -4,10 +4,10 @@ Small, reproducible sandbox for conditional generative modelling on a synthetic 
 
 It includes:
 - a **conditional VAE** conditioned on **lattice type** (categorical) and **rotation** (continuous),
-- baseline latent sampling via **\(z \sim N(0,I)\)** and a **mixture-of-posteriors (MoP)** / aggregated-posterior proxy,
+- baseline latent sampling via **$z \sim \mathcal{N}(0, I)$** and a **mixture-of-posteriors (MoP)** / aggregated-posterior proxy,
 - a **latent diffusion prior** (DDPM-style noise-prediction objective, DDIM sampling) trained in latent space.
 
-## Key results (saved images)
+## Key results
 
 Representative figures are committed under `assets/`:
 
@@ -17,7 +17,7 @@ Representative figures are committed under `assets/`:
 - `assets/cond_withrot/`  
   Main experiment: conditional VAE on `(type, theta)` with:
   - `vae_recon.png` — reconstructions (sanity check: encoder/decoder work)
-  - `vae_samples_prior.png` — samples from standard VAE prior \(N(0,I)\)
+  - `vae_samples_prior.png` — samples from standard VAE prior $z \sim \mathcal{N}(0, I)$
   - `vae_samples_mop.png` — samples from MoP / aggregated posterior proxy
   - `vae_loss.png` — training curve
 
@@ -26,9 +26,19 @@ Representative figures are committed under `assets/`:
   - `diffusion_samples.png` — diffusion-prior samples (decoded through the VAE)
   - `diffusion_loss.png` — training curve
 
+### Visual summary 
+
+<p align="left">
+  <img src="assets/cond_withrot/vae_recon.png" width="240" />
+  <img src="assets/cond_withrot/vae_samples_prior.png" width="240" />
+  <img src="assets/cond_withrot/vae_samples_mop.png" width="240" />
+  <img src="assets/diffusion_firstattempt/diffusion_samples.png" width="240" />
+</p>
+*Left→right: reconstructions, $z \sim \mathcal{N}(0, I)$ samples, MoP samples, diffusion-prior samples.*
+
 ### Qualitative takeaways
 - **Reconstructions** are crisp and confirm the conditional VAE learns the data manifold.
-- **\(N(0,I)\) prior sampling** often leaves the manifold (blurry / incorrect structure), indicating a prior mismatch.
+- **$\mathcal{N}(0, I)$ prior sampling** often leaves the manifold (blurry / incorrect structure), indicating a prior mismatch.
 - **MoP sampling** produces much cleaner outputs (sampling from encoder posteriors of real datapoints).
 - **Diffusion prior** samples are typically **more consistent** than the standard prior samples, but do not yet reach the MoP baseline in this configuration.
 
@@ -67,7 +77,7 @@ pip install -e .
 ```
 
 ## Quickstart
-```
+```bash
 # 1) (optional) preview on-the-fly data
 python scripts/preview_data.py
 
