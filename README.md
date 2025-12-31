@@ -27,19 +27,13 @@ Representative figures are committed under `assets/`:
   - `diffusion_loss.png` — training curve
 
 ### Visual summary 
-<p align="center">
-  <img src="assets/cond_withrot/vae_recon.png" width="720" />
-</p>
+| Reconstructions (input $X$, reconstruction $\hat{X}$). |
+|:--:|
+| <img src="assets/cond_withrot/vae_recon.png" width="833" /> |
 
-<p align="center"><em>Reconstructions (input $x$, reconstruction $\hat{x}$).</em></p>
-
-<p align="center">
-  <img src="assets/cond_withrot/vae_samples_prior.png" width="260" />
-  <img src="assets/cond_withrot/vae_samples_mop.png" width="260" />
-  <img src="assets/diffusion_firstattempt/diffusion_samples.png" width="260" />
-</p>
-
-<p align="center"><em>Left→right: reconstructions, $z \sim \mathcal{N}(0, I)$ samples, MoP samples, diffusion-prior samples.</em></p>
+| $z \sim \mathcal{N}(0, I)$ samples | MoP samples | Diffusion-prior samples |
+|:--:|:--:|:--:|
+| <img src="assets/cond_withrot/vae_samples_prior.png" width="260" /> | <img src="assets/cond_withrot/vae_samples_mop.png" width="260" /> | <img src="assets/diffusion_firstattempt/diffusion_samples.png" width="260" /> |
 
 ### Qualitative takeaways
 - **Reconstructions** are crisp and confirm the conditional VAE learns the data manifold.
