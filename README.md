@@ -92,21 +92,17 @@ python scripts/train_diffusion_prior.py --epochs 200
 
 ## Score-based diffusion on images (VP-SDE)
 
-In addition to the CVAE + latent diffusion prior, this repo includes a **score-based diffusion model trained directly on the lattice images**. The implementation follows the VP-SDE / score-matching view (as in the MIT 6.S184 course): we train a neural network to predict the Gaussian noise \(\epsilon\) along a known forward noising process, and generate samples by integrating the **probability-flow ODE**.
+In addition to the CVAE + latent diffusion prior, this repo includes a **score-based diffusion model trained directly on the lattice images**. The implementation follows the VP-SDE / score-matching view (as in the MIT 6.S184 course): we train a neural network to predict the Gaussian noise $\\varepsilon$ along a known forward noising process, and generate samples by integrating the **probability-flow ODE**.
 
 ### What is implemented
-- **VP-SDE (Ornstein–Uhlenbeck / variance-preserving)** forward process:
-  \[
-  x_t = \alpha(t)\,x_0 + \sigma(t)\,\epsilon,\quad \epsilon \sim \mathcal{N}(0,I)
-  \]
-- **Epsilon prediction** objective (denoising score matching):
-  \[
-  \min_\theta \; \mathbb{E}\|\epsilon_\theta(x_t,t,c) - \epsilon\|^2
-  \]
+- **VP-SDE (variance-preserving) forward process:** $x_t = \\alpha(t) x_0 + \\sigma(t) \\varepsilon$ with $\\varepsilon \\sim \\mathcal{N}(0, I)$.
+- **Epsilon prediction objective (denoising score matching):** minimise $\\mathbb{E}[\\|\\varepsilon_\\theta(x_t, t, c) - \\varepsilon\\|^2]$.
 - **Conditional generation** using the same conditions as the dataset:
   - categorical: lattice type
   - continuous: rotation (and other continuous fields if present)
-- **Probability-flow ODE sampling** (Heun integrator), with optional classifier-free guidance (CFG).
+- **Probability-flow ODE sampling** (Heun integrator) with optional classifier-free guidance (CFG).
+
+The current sample grids for the VP-SDE image model (work in progress) are saved in `assets/diffusion_sde_images/`.
 
 ### How to train
 ```bash
