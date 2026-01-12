@@ -1,6 +1,7 @@
 # Toy Crystals — conditional VAE and latent-prior experiments
 
 Small, reproducible sandbox for conditional generative modelling on a synthetic “toy-crystals” dataset (periodic lattices rendered as Gaussian “atoms”).
+In addition to the CVAE + latent diffusion prior, this repo also includes a score-based diffusion model trained directly on the lattice images (see “Score-based diffusion on images (VP-SDE)” below).
 
 It includes:
 - a **conditional VAE** conditioned on **lattice type** (categorical) and **rotation** (continuous),
