@@ -89,3 +89,37 @@ python scripts/train_vae.py --data-path data/toycrystals_train_rotonly.pt --epoc
 # 4) train the latent diffusion prior and sample (decoded through the VAE)
 python scripts/train_diffusion_prior.py --epochs 200
 ```
+
+## Score-based diffusion on images (VP-SDE)
+
+In addition to the CVAE + latent diffusion prior, this repo includes a **score-based diffusion model trained directly on the lattice images**. The implementation follows the VP-SDE / score-matching view (as in the MIT 6.S184 course): we train a neural network to predict the Gaussian noise \(\epsilon\) along a known forward noising process, and generate samples by integrating the **probability-flow ODE**.
+
+### What is implemented
+- **VP-SDE (Ornstein–Uhlenbeck / variance-preserving)** forward process:
+  \[
+  x_t = \alpha(t)\,x_0 + \sigma(t)\,\epsilon,\quad \epsilon \sim \mathcal{N}(0,I)
+  \]
+- **Epsilon prediction** objective (denoising score matching):
+  \[
+  \min_\theta \; \mathbb{E}\|\epsilon_\theta(x_t,t,c) - \epsilon\|^2
+  \]
+- **Conditional generation** using the same conditions as the dataset:
+  - categorical: lattice type
+  - continuous: rotation (and other continuous fields if present)
+- **Probability-flow ODE sampling** (Heun integrator), with optional classifier-free guidance (CFG).
+
+### How to train
+```bash
+python scripts/train_sde_score_model.py \
+  --data-path data/toycrystals_train_rotonly.pt \
+  --out-dir runs/sde_score \
+  --epochs 40 \
+  --lr 1e-4 \
+  --base-ch 64 \
+  --beta-max 20 \
+  --sample-every 10 \
+  --sample-steps 200 \
+  --cfg 1.5 \
+  --t-end 1e-3
+
+

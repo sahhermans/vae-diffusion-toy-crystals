@@ -40,7 +40,7 @@ def _lattice_definition(
         basis = torch.tensor([[0.0, 0.0]], dtype=torch.float32)
 
     elif lattice_type == 1:  # rectangular
-        aspect = _uniform(g, 0.75, 1.35)
+        aspect = _uniform(g, 0.75, 1.35) # nuisance variable not measured/conditioned on
         b = a * aspect
         v1 = torch.tensor([a, 0.0], dtype=torch.float32)
         v2 = torch.tensor([0.0, b], dtype=torch.float32)
