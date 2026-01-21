@@ -2,168 +2,104 @@
 
 This repo explores conditional generation on a synthetic “toy-crystals” dataset: periodic lattice images rendered as Gaussian “atoms”.
 
-There are **two main pipelines** in this project:
+There are two main pipelines:
 
-**A) VAE pipeline (with two priors)**
-- A **conditional VAE** learns an encoder/decoder and reconstructs well.
-- For sampling, we compare:
-  - **standard Gaussian prior** \(z\sim\mathcal N(0,I)\) (baseline)
-  - a **learned latent diffusion prior** \(p_\theta(z\mid c)\) trained on VAE latents (improves sampling)
+A) **VAE pipeline (with two priors)**
+- Train a conditional VAE (good reconstructions).
+- For sampling, compare:
+  - **standard Gaussian prior**: z ~ N(0, I)  (baseline)
+  - **learned latent diffusion prior**: a diffusion model trained on VAE latents to approximate a better conditional prior p(z | c)
 
-**B) Direct diffusion pipeline**
-- A **VP-SDE score model** trained directly on images (no VAE), sampled with probability-flow ODE or reverse-SDE.
+B) **Direct diffusion pipeline**
+- A VP-SDE score model trained directly on images (no VAE), sampled with probability-flow ODE or reverse-SDE.
 
-Approach B follows standard diffusion / SDE notation as used in MIT’s diffusion course materials:
-**MIT 6.S184: Generative AI with Stochastic Differential Equations**  
+Approach B follows standard diffusion / SDE notation as used in MIT’s diffusion course materials: <br>
+**MIT 6.S184: Generative AI with Stochastic Differential Equations** <br>
 Course site: https://diffusion.csail.mit.edu/2025/
 
 ---
 
 ## Results (figures in `assets/`)
 
-### Dataset preview
-<p align="center">
-  <img src="assets/preview_toycrystals.png" width="900" />
-</p>
-
----
-
 ## A) VAE pipeline
 
-### A1) Conditional VAE
-
-Let \(x \in [0,1]^{1\times H\times W}\) be an image and \(c\) the condition (lattice type + rotation). A conditional VAE uses:
-- encoder \(q_\phi(z\mid x,c)\),
-- decoder \(p_\theta(x\mid z,c)\),
-- prior \(p(z)=\mathcal N(0,I)\).
-
-Training objective (reconstruction MSE + \(\beta\)-weighted KL):
-\[
-\mathcal L_{\mathrm{VAE}}
-= \mathbb E\big[\lVert x-\hat x\rVert_2^2\big]
-+ \beta\, D_{\mathrm{KL}}\!\big(q_\phi(z\mid x,c)\,\Vert\,\mathcal N(0,I)\big).
-\]
-
-If “free-bits” are enabled:
-\[
-\mathrm{KL}_{\text{used}}=\sum_{j=1}^{d_z}\max(\mathrm{KL}_j,\tau).
-\]
-
-<table>
-  <tr>
-    <td align="center"><b>Reconstructions</b></td>
-    <td align="center"><b>Loss curve</b></td>
-  </tr>
-  <tr>
-    <td><img src="assets/vae_standard_prior/vae_recon.png" width="430"/></td>
-    <td><img src="assets/vae_standard_prior/vae_loss.png" width="430"/></td>
-  </tr>
-</table>
+### A1) Conditional VAE (reconstructions)
+<p align="center">
+  <img src="assets/vae_standard_prior/vae_recon.png" width="900" />
+</p>
 
 ### A2) Sampling with different priors
 
 <table>
   <tr>
-    <td align="center"><b>Standard prior</b> (\(z\sim\mathcal N(0,I)\))</td>
+    <td align="center"><b>Standard prior sampling</b><br/>z ~ N(0, I)</td>
     <td align="center"><b>MoP / aggregated-posterior proxy</b></td>
   </tr>
   <tr>
-    <td><img src="assets/vae_standard_prior/vae_standard_prior_sampliing.png" width="430"/></td>
+    <td><img src="assets/vae_standard_prior/vae_standard_prior_sampling.png" width="430"/></td>
     <td><img src="assets/vae_standard_prior/vae_mop_sampling.png" width="430"/></td>
   </tr>
 </table>
 
-- Standard-prior sampling is the baseline and can leave the data manifold.
-- MoP sampling is an intentionally strong baseline (sampling near posteriors of real datapoints).
+**Qualitative comparison (why the prior matters)**  
+- The VAE decoder learns a good mapping from “in-distribution” latents to images (reconstructions are crisp).
+- But the VAE’s standard prior z ~ N(0, I) can be a mismatch to the encoder’s aggregated posterior, so samples can drift off the data manifold.
+- MoP sampling is an intentionally strong reference point because it samples around posteriors of real datapoints (so it tends to stay on-manifold).
+
+### A3) Latent diffusion prior (improving VAE sampling)
+Instead of sampling z from N(0, I), a diffusion model is trained in latent space on cached VAE latents (often using z = μ). At sampling time, it generates z conditioned on c, and the VAE decoder maps z → image.
+
+<p align="center">
+  <img src="assets/vae_latent_diffusion_prior/vae_latent_diffusion_prior_sampling.png" width="430" />
+</p>
+
+**Qualitative comparison (standard prior vs diffusion prior)**  
+- Standard-prior sampling is the simplest baseline, but it tends to produce more “off-manifold” artefacts.
+- The latent diffusion prior usually gives **more consistent** samples because it is trained to match the latent distribution actually used by the decoder (conditioned on c), rather than assuming a single global Gaussian.
+- MoP can still be hard to beat visually because it is anchored to real datapoints; the diffusion prior is the more realistic “learned prior” alternative.
+
+**Diffusion-prior training settings used for the committed figure**
+- T = 1000
+- width = 1024
+- beta_end = 0.05
+- epochs = 300
 
 ---
 
-### A3) Latent diffusion prior (improves VAE sampling)
+## B) Direct diffusion pipeline (VP-SDE on images)
 
-Instead of sampling \(z\sim\mathcal N(0,I)\), we train a diffusion model in latent space to approximate a better conditional prior \(p_\theta(z\mid c)\).
+This approach trains directly on images (no VAE). It supports:
+- probability-flow ODE sampling (deterministic)
+- reverse-SDE sampling (stochastic; Euler–Maruyama)
+- classifier-free guidance (CFG)
+- optional EMA weights
 
-Forward diffusion:
-\[
-z_t = \sqrt{\bar\alpha_t}\, z_0 + \sqrt{1-\bar\alpha_t}\,\varepsilon,
-\qquad \varepsilon\sim\mathcal N(0,I).
-\]
+<p align="center">
+  <img src="assets/score_based_diffusion/score_based_diffusion_samples.png" width="430" />
+</p>
 
-Noise-prediction objective:
-\[
-\mathcal L_{\mathrm{diff}}
-= \mathbb E \Big[\lVert \varepsilon - \varepsilon_\theta(z_t,t,c)\rVert_2^2\Big].
-\]
-
-Sampling is performed in latent space and then decoded via the VAE decoder.
-
-<table>
-  <tr>
-    <td align="center"><b>Latent diffusion prior samples</b></td>
-    <td align="center"><b>Training curve</b></td>
-  </tr>
-  <tr>
-    <td><img src="assets/vae_latent_diffusion_prior/vae_latent_diffusion_prior_sampling.png" width="430"/></td>
-    <td><img src="assets/vae_latent_diffusion_prior/diffusion_loss.png" width="430"/></td>
-  </tr>
-</table>
-
-**Settings used for the diffusion-prior results**
-- \(T = 1000\)
-- width \(= 1024\)
-- \(\beta_{\text{end}} = 0.05\)
-- epochs \(= 300\)
-
----
-
-## B) Direct diffusion pipeline: VP-SDE on images
-
-VP-SDE forward process:
-\[
-\mathrm d x
-= -\tfrac12 \beta(t)\,x\,\mathrm dt + \sqrt{\beta(t)}\,\mathrm dW,
-\qquad
-\beta(t)=\beta_{\min}+t(\beta_{\max}-\beta_{\min}).
-\]
-
-Using the marginal parameterisation:
-\[
-x_t = \alpha(t)\,x_0 + \sigma(t)\,\varepsilon,\qquad \varepsilon\sim\mathcal N(0,I),
-\]
-and the usual connection to an \(\varepsilon\)-predictor:
-\[
-s_\theta(x_t,t,c)\approx \nabla_x \log p_t(x\mid c)
-= -\frac{\varepsilon_\theta(x_t,t,c)}{\sigma(t)}.
-\]
-
-Classifier-free guidance:
-\[
-\varepsilon_{\text{CFG}}
-= \varepsilon_{\text{uncond}} + w\big(\varepsilon_{\text{cond}}-\varepsilon_{\text{uncond}}\big).
-\]
-
-<table>
-  <tr>
-    <td align="center"><b>Samples</b></td>
-    <td align="center"><b>Training curve</b></td>
-  </tr>
-  <tr>
-    <td><img src="assets/score_based_diffusion/samples_ckpt-sde_score_model.png" width="430"/></td>
-    <td><img src="assets/score_based_diffusion/sde_loss.png" width="430"/></td>
-  </tr>
-</table>
-
-**Settings used for the final VP-SDE sample grid**
-- steps \(= 300\)
-- CFG \(= 1.50\)
-- \(t_{\text{end}} = 0.005\)
+**VP-SDE sampling settings used for the final grid**
+- steps = 300
+- cfg = 1.50
+- t_end = 0.005
 - sampler = reverse-SDE (Euler–Maruyama)
 - EMA enabled
 
 ---
 
-## Running the code (copyable)
-````bash
-# 0) install
+## Repo layout
+
+- src/toycrystals/…  — dataset + models
+- scripts/…          — training/sampling entry points
+- assets/…           — figures committed to git
+- data/, checkpoints/, results/, runs/ — generated artefacts (recommended to keep out of git)
+
+---
+
+## Quickstart (commands)
+
+### Install
+```bash
 pip install torch
 pip install -e .
 
