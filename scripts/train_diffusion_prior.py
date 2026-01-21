@@ -11,7 +11,7 @@ from tqdm import tqdm
 
 from toycrystals.disk_data import ToyCrystalsDiskDataset
 from toycrystals.models.vae import CondVAE
-from toycrystals.models.diffusion_prior import DiffusionPrior, DiffusionSchedule
+from toycrystals.models.diffusion_prior import DiffusionPrior, DiffusionSchedule, DiffusionPriorFiLM
 
 
 @torch.no_grad()
@@ -123,7 +123,7 @@ def main() -> int:
     # Diffusion
     p.add_argument("--T", type=int, default=200)
     p.add_argument("--beta-start", type=float, default=1e-4)
-    p.add_argument("--beta-end", type=float, default=0.1)
+    p.add_argument("--beta-end", type=float, default=1)
     p.add_argument("--t-emb-dim", type=int, default=64)
     p.add_argument("--width", type=int, default=512)
     p.add_argument("--batch-size", type=int, default=256)
@@ -193,12 +193,14 @@ def main() -> int:
     latent_dl = DataLoader(latent_ds, batch_size=args.batch_size, shuffle=True, num_workers=0, drop_last=True)
 
     # --- diffusion prior ---
-    prior = DiffusionPrior(
+    prior = DiffusionPriorFiLM(
         z_dim=args.z_dim,
         n_types=args.n_types,
         y_cont_dim=args.y_cont_dim,
         t_emb_dim=args.t_emb_dim,
         width=args.width,
+        n_blocks=8,         
+        y_cat_emb_dim=64,   
     ).to(device)
 
     # --- diffusion schedule ---

@@ -36,6 +36,97 @@ def y_vec(y_cat: torch.Tensor, y_cont: torch.Tensor, n_types: int) -> torch.Tens
     return torch.cat([y_oh, y_cont.to(dtype=torch.float32)], dim=1)
 
 
+class FiLMResBlock(nn.Module):
+    def __init__(self, width: int, cond_dim: int, mult: int = 4) -> None:
+        super().__init__()
+        self.norm = nn.LayerNorm(width)
+        self.fc1 = nn.Linear(width, mult * width)
+        self.fc2 = nn.Linear(mult * width, width)
+        self.cond = nn.Linear(cond_dim, 2 * width)  # gamma, beta
+        self.act = nn.SiLU()
+
+    def forward(self, x: torch.Tensor, cond: torch.Tensor) -> torch.Tensor:
+        # x: [B, width], cond: [B, cond_dim]
+        h = self.norm(x)
+        gamma, beta = self.cond(cond).chunk(2, dim=-1)
+        h = h * (1.0 + gamma) + beta
+        h = self.fc2(self.act(self.fc1(h)))
+        return x + h
+
+
+class DiffusionPriorFiLM(nn.Module):
+    """
+    Drop-in replacement for DiffusionPrior:
+    predicts epsilon given z_t, t, y_cat, y_cont.
+    Uses residual MLP blocks with FiLM conditioning from (t,y).
+    """
+    def __init__(
+        self,
+        z_dim: int,
+        n_types: int,
+        y_cont_dim: int,
+        t_emb_dim: int = 64,
+        width: int = 256,
+        n_blocks: int = 6,
+        y_cat_emb_dim: int = 64,
+    ) -> None:
+        super().__init__()
+        self.z_dim = int(z_dim)
+        self.n_types = int(n_types)
+        self.y_cont_dim = int(y_cont_dim)
+        self.t_emb_dim = int(t_emb_dim)
+
+        # Categorical conditioning: learn an embedding instead of one-hot
+        self.y_cat_emb = nn.Embedding(self.n_types, y_cat_emb_dim)
+
+        # Continuous conditioning (optionally more expressive than raw concat)
+        self.y_cont_mlp = nn.Sequential(
+            nn.Linear(self.y_cont_dim, y_cat_emb_dim),
+            nn.SiLU(),
+            nn.Linear(y_cat_emb_dim, y_cat_emb_dim),
+        )
+
+        # Fuse y features into width
+        self.y_fuse = nn.Sequential(
+            nn.Linear(2 * y_cat_emb_dim, width),
+            nn.SiLU(),
+            nn.Linear(width, width),
+        )
+
+        # Project timestep embedding into width
+        self.t_mlp = nn.Sequential(
+            nn.Linear(self.t_emb_dim, width),
+            nn.SiLU(),
+            nn.Linear(width, width),
+        )
+
+        self.in_proj = nn.Linear(self.z_dim, width)
+
+        # Conditioning vector is concat(t_feat, y_feat)
+        cond_dim = 2 * width
+        self.blocks = nn.ModuleList([FiLMResBlock(width, cond_dim) for _ in range(n_blocks)])
+
+        self.out_norm = nn.LayerNorm(width)
+        self.out_proj = nn.Linear(width, self.z_dim)
+
+    def forward(self, z_t: torch.Tensor, t: torch.Tensor, y_cat: torch.Tensor, y_cont: torch.Tensor) -> torch.Tensor:
+        # t: [B] int64, y_cat: [B] int64, y_cont: [B, y_cont_dim]
+        te = timestep_embedding(t, self.t_emb_dim)          # [B, t_emb_dim]
+        t_feat = self.t_mlp(te)                              # [B, width]
+
+        y_cat_feat = self.y_cat_emb(y_cat)                   # [B, y_cat_emb_dim]
+        y_cont_feat = self.y_cont_mlp(y_cont.to(torch.float32))  # [B, y_cat_emb_dim]
+        y_feat = self.y_fuse(torch.cat([y_cat_feat, y_cont_feat], dim=-1))  # [B, width]
+
+        cond = torch.cat([t_feat, y_feat], dim=-1)           # [B, 2*width]
+
+        h = self.in_proj(z_t)                                # [B, width]
+        for blk in self.blocks:
+            h = blk(h, cond)
+        h = self.out_proj(self.out_norm(h))                  # [B, z_dim]
+        return h
+
+
 class DiffusionPrior(nn.Module):
     """
     Predicts epsilon given z_t, t, and y.
@@ -109,7 +200,7 @@ class DiffusionSchedule:
     @torch.no_grad()
     def ddim_sample(
         self,
-        model: DiffusionPrior,
+        model: nn.Module,
         y_cat: torch.Tensor,
         y_cont: torch.Tensor,
         n_steps: int = 50,
