@@ -1,125 +1,193 @@
-# Toy Crystals — conditional VAE and latent-prior experiments
+# ToyCrystals — conditional generation on synthetic lattice images
 
-Small, reproducible sandbox for conditional generative modelling on a synthetic “toy-crystals” dataset (periodic lattices rendered as Gaussian “atoms”).
+This repo explores conditional generation on a synthetic “toy-crystals” dataset: periodic lattice images rendered as Gaussian “atoms”.
 
-It includes:
-- a **conditional VAE** conditioned on **lattice type** (categorical) and **rotation** (continuous),
-- baseline latent sampling via **$z \sim \mathcal{N}(0, I)$** and a **mixture-of-posteriors (MoP)** / aggregated-posterior proxy,
-- a **latent diffusion prior** (DDPM-style noise-prediction objective, DDIM sampling) trained in latent space.
+There are **two main pipelines** in this project:
 
-## Key results
+**A) VAE pipeline (with two priors)**
+- A **conditional VAE** learns an encoder/decoder and reconstructs well.
+- For sampling, we compare:
+  - **standard Gaussian prior** \(z\sim\mathcal N(0,I)\) (baseline)
+  - a **learned latent diffusion prior** \(p_\theta(z\mid c)\) trained on VAE latents (improves sampling)
 
-Representative figures are committed under `assets/`:
+**B) Direct diffusion pipeline**
+- A **VP-SDE score model** trained directly on images (no VAE), sampled with probability-flow ODE or reverse-SDE.
 
-- `assets/preview_toycrystals.png`  
-  Dataset preview.
+Approach B follows standard diffusion / SDE notation as used in MIT’s diffusion course materials:
+**MIT 6.S184: Generative AI with Stochastic Differential Equations**  
+Course site: https://diffusion.csail.mit.edu/2025/
 
-- `assets/cond_withrot/`  
-  Main experiment: conditional VAE on `(type, theta)` with:
-  - `vae_recon.png` — reconstructions (sanity check: encoder/decoder work)
-  - `vae_samples_prior.png` — samples from standard VAE prior $z \sim \mathcal{N}(0, I)$
-  - `vae_samples_mop.png` — samples from MoP / aggregated posterior proxy
-  - `vae_loss.png` — training curve
+---
 
-- `assets/diffusion_firstattempt/`  
-  Latent diffusion prior trained on cached encoder latents:
-  - `diffusion_samples.png` — diffusion-prior samples (decoded through the VAE)
-  - `diffusion_loss.png` — training curve
+## Results (figures in `assets/`)
 
-### Visual summary 
-| Reconstructions (input $X$, reconstruction $\hat{X}$). |
-|:--:|
-| <img src="assets/cond_withrot/vae_recon.png" width="833" /> |
+### Dataset preview
+<p align="center">
+  <img src="assets/preview_toycrystals.png" width="900" />
+</p>
 
-| $z \sim \mathcal{N}(0, I)$ samples | MoP samples | Diffusion-prior samples |
-|:--:|:--:|:--:|
-| <img src="assets/cond_withrot/vae_samples_prior.png" width="260" /> | <img src="assets/cond_withrot/vae_samples_mop.png" width="260" /> | <img src="assets/diffusion_firstattempt/diffusion_samples.png" width="260" /> |
+---
 
-### Qualitative takeaways
-- **Reconstructions** are crisp and confirm the conditional VAE learns the data manifold.
-- **$\mathcal{N}(0, I)$ prior sampling** often leaves the manifold (blurry / incorrect structure), indicating a prior mismatch.
-- **MoP sampling** produces much cleaner outputs (sampling from encoder posteriors of real datapoints).
-- **Diffusion prior** samples are typically **more consistent** than the standard prior samples, but do not yet reach the MoP baseline in this configuration.
+## A) VAE pipeline
 
-## Dataset
+### A1) Conditional VAE
 
-Each datapoint is an image `x` of shape `[1, H, W]` plus conditioning:
-- `y_cat`: lattice type (int)
-- `y_cont`: continuous vector including `theta` (rotation angle).  
-  In `rot_only` mode: `y_cont = [0, theta, 0, 0]`.
+Let \(x \in [0,1]^{1\times H\times W}\) be an image and \(c\) the condition (lattice type + rotation). A conditional VAE uses:
+- encoder \(q_\phi(z\mid x,c)\),
+- decoder \(p_\theta(x\mid z,c)\),
+- prior \(p(z)=\mathcal N(0,I)\).
 
-Two ways to obtain data:
-1) On-the-fly generation for quick iteration.
-2) Precomputed `.pt` files on disk for faster training and reproducibility.
+Training objective (reconstruction MSE + \(\beta\)-weighted KL):
+\[
+\mathcal L_{\mathrm{VAE}}
+= \mathbb E\big[\lVert x-\hat x\rVert_2^2\big]
++ \beta\, D_{\mathrm{KL}}\!\big(q_\phi(z\mid x,c)\,\Vert\,\mathcal N(0,I)\big).
+\]
 
-## Scripts
+If “free-bits” are enabled:
+\[
+\mathrm{KL}_{\text{used}}=\sum_{j=1}^{d_z}\max(\mathrm{KL}_j,\tau).
+\]
 
-- `scripts/preview_data.py` — quick dataset preview (writes to `results/`)
-- `scripts/build_dataset.py` — generate and save a disk dataset (`.pt`)
-- `scripts/train_vae.py` — train VAE and export reconstructions / prior samples / MoP samples
-- `scripts/train_diffusion_prior.py` — build latent cache, train diffusion prior, sample and decode
+<table>
+  <tr>
+    <td align="center"><b>Reconstructions</b></td>
+    <td align="center"><b>Loss curve</b></td>
+  </tr>
+  <tr>
+    <td><img src="assets/vae_standard_prior/vae_recon.png" width="430"/></td>
+    <td><img src="assets/vae_standard_prior/vae_loss.png" width="430"/></td>
+  </tr>
+</table>
 
-## Installation
+### A2) Sampling with different priors
 
-This project uses PyTorch, which is **not** pinned in `pyproject.toml` (so install it separately first).
+<table>
+  <tr>
+    <td align="center"><b>Standard prior</b> (\(z\sim\mathcal N(0,I)\))</td>
+    <td align="center"><b>MoP / aggregated-posterior proxy</b></td>
+  </tr>
+  <tr>
+    <td><img src="assets/vae_standard_prior/vae_standard_prior_sampliing.png" width="430"/></td>
+    <td><img src="assets/vae_standard_prior/vae_mop_sampling.png" width="430"/></td>
+  </tr>
+</table>
 
-```bash
-python -m venv .venv
-# activate venv
-pip install -U pip
+- Standard-prior sampling is the baseline and can leave the data manifold.
+- MoP sampling is an intentionally strong baseline (sampling near posteriors of real datapoints).
 
-# install PyTorch (CPU/CUDA) using the official instructions for your system
+---
+
+### A3) Latent diffusion prior (improves VAE sampling)
+
+Instead of sampling \(z\sim\mathcal N(0,I)\), we train a diffusion model in latent space to approximate a better conditional prior \(p_\theta(z\mid c)\).
+
+Forward diffusion:
+\[
+z_t = \sqrt{\bar\alpha_t}\, z_0 + \sqrt{1-\bar\alpha_t}\,\varepsilon,
+\qquad \varepsilon\sim\mathcal N(0,I).
+\]
+
+Noise-prediction objective:
+\[
+\mathcal L_{\mathrm{diff}}
+= \mathbb E \Big[\lVert \varepsilon - \varepsilon_\theta(z_t,t,c)\rVert_2^2\Big].
+\]
+
+Sampling is performed in latent space and then decoded via the VAE decoder.
+
+<table>
+  <tr>
+    <td align="center"><b>Latent diffusion prior samples</b></td>
+    <td align="center"><b>Training curve</b></td>
+  </tr>
+  <tr>
+    <td><img src="assets/vae_latent_diffusion_prior/vae_latent_diffusion_prior_sampling.png" width="430"/></td>
+    <td><img src="assets/vae_latent_diffusion_prior/diffusion_loss.png" width="430"/></td>
+  </tr>
+</table>
+
+**Settings used for the diffusion-prior results**
+- \(T = 1000\)
+- width \(= 1024\)
+- \(\beta_{\text{end}} = 0.05\)
+- epochs \(= 300\)
+
+---
+
+## B) Direct diffusion pipeline: VP-SDE on images
+
+VP-SDE forward process:
+\[
+\mathrm d x
+= -\tfrac12 \beta(t)\,x\,\mathrm dt + \sqrt{\beta(t)}\,\mathrm dW,
+\qquad
+\beta(t)=\beta_{\min}+t(\beta_{\max}-\beta_{\min}).
+\]
+
+Using the marginal parameterisation:
+\[
+x_t = \alpha(t)\,x_0 + \sigma(t)\,\varepsilon,\qquad \varepsilon\sim\mathcal N(0,I),
+\]
+and the usual connection to an \(\varepsilon\)-predictor:
+\[
+s_\theta(x_t,t,c)\approx \nabla_x \log p_t(x\mid c)
+= -\frac{\varepsilon_\theta(x_t,t,c)}{\sigma(t)}.
+\]
+
+Classifier-free guidance:
+\[
+\varepsilon_{\text{CFG}}
+= \varepsilon_{\text{uncond}} + w\big(\varepsilon_{\text{cond}}-\varepsilon_{\text{uncond}}\big).
+\]
+
+<table>
+  <tr>
+    <td align="center"><b>Samples</b></td>
+    <td align="center"><b>Training curve</b></td>
+  </tr>
+  <tr>
+    <td><img src="assets/score_based_diffusion/samples_ckpt-sde_score_model.png" width="430"/></td>
+    <td><img src="assets/score_based_diffusion/sde_loss.png" width="430"/></td>
+  </tr>
+</table>
+
+**Settings used for the final VP-SDE sample grid**
+- steps \(= 300\)
+- CFG \(= 1.50\)
+- \(t_{\text{end}} = 0.005\)
+- sampler = reverse-SDE (Euler–Maruyama)
+- EMA enabled
+
+---
+
+## Running the code (copyable)
+````bash
+# 0) install
 pip install torch
-
-# install this package
 pip install -e .
+
+# 1) build dataset
+python scripts/build_dataset.py --out data/toycrystals_train_rotonly.pt --n-samples 50000 --img-size 64 --n-types 4 --rot-only
+
+# 2) train VAE
+python scripts/train_vae.py --data-path data/toycrystals_train_rotonly.pt --epochs 15 --batch-size 128 --z-dim 32
+
+# 3) train latent diffusion prior (settings used for the figures)
+python scripts/train_diffusion_prior.py --T 1000 --beta-start 1e-4 --beta-end 0.05 --width 1024 --t-emb-dim 64 --batch-size 256 --lr 1e-4 --epochs 300 --z-target mu --latent-cache data/latents_mu_T1000_b005.pt --prior-ckpt checkpoints/prior_mu_T1000_b005_w1024_lr1e-4.pt
+
+# 4) train VP-SDE score model
+python scripts/train_sde_score_model.py --data-path data/toycrystals_train_rotonly.pt --epochs 40 --batch-size 128 --lr 1e-4 --beta-min 0.1 --beta-max 30 --p-uncond 0.1 --ema-decay 0.999
+
+# 5) sample VP-SDE (settings used for the final grid)
+python scripts/sample_sde_score_model.py --device cuda --out-dir runs/sde_score/<run_dir_or_checkpoint_dir> --ckpt last --steps 300 --cfg 1.5 --t-end 0.005 --sampler sde --use-ema 1 --n 36
 ```
 
-## Quickstart
-```bash
-# 1) (optional) preview on-the-fly data
-python scripts/preview_data.py
+---
 
-# 2) build a reproducible training dataset on disk
-python scripts/build_dataset.py --out data/toycrystals_train_rotonly.pt --n-samples 50000 --img-size 64 --n-types 4
+## Repo layout
 
-# 3) train the (conditional) VAE (use --uncond for an unconditional baseline)
-python scripts/train_vae.py --data-path data/toycrystals_train_rotonly.pt --epochs 25
-
-# 4) train the latent diffusion prior and sample (decoded through the VAE)
-python scripts/train_diffusion_prior.py --epochs 200
-```
-
-## Score-based diffusion on images (VP-SDE)
-
-In addition to the CVAE + latent diffusion prior, this repo includes a **score-based diffusion model trained directly on the lattice images**. The implementation follows the VP-SDE / score-matching view (as in the MIT 6.S184 course): we train a neural network to predict the Gaussian noise \(\epsilon\) along a known forward noising process, and generate samples by integrating the **probability-flow ODE**.
-
-### What is implemented
-- **VP-SDE (Ornstein–Uhlenbeck / variance-preserving)** forward process:
-  \[
-  x_t = \alpha(t)\,x_0 + \sigma(t)\,\epsilon,\quad \epsilon \sim \mathcal{N}(0,I)
-  \]
-- **Epsilon prediction** objective (denoising score matching):
-  \[
-  \min_\theta \; \mathbb{E}\|\epsilon_\theta(x_t,t,c) - \epsilon\|^2
-  \]
-- **Conditional generation** using the same conditions as the dataset:
-  - categorical: lattice type
-  - continuous: rotation (and other continuous fields if present)
-- **Probability-flow ODE sampling** (Heun integrator), with optional classifier-free guidance (CFG).
-
-### How to train
-```bash
-python scripts/train_sde_score_model.py \
-  --data-path data/toycrystals_train_rotonly.pt \
-  --out-dir runs/sde_score \
-  --epochs 40 \
-  --lr 1e-4 \
-  --base-ch 64 \
-  --beta-max 20 \
-  --sample-every 10 \
-  --sample-steps 200 \
-  --cfg 1.5 \
-  --t-end 1e-3
-
-
+- `src/toycrystals/…` — dataset + models
+- `scripts/…` — training/sampling entry points
+- `assets/…` — figures committed to git
+- `data/`, `checkpoints/`, `results/`, `runs/` — generated artefacts (recommended to keep out of git)
