@@ -34,6 +34,8 @@ artifacts/
 data/
 assets/simple_cond
 assets/simple_uncond
+runs/
+**/old/
 
 # Large model files
 *.pt
