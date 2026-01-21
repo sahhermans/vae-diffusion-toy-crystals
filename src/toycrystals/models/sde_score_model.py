@@ -3,12 +3,13 @@ from __future__ import annotations
 import math
 from dataclasses import dataclass
 from typing import Tuple
+import matplotlib.pyplot as plt
 
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-
+import matplotlib.pyplot as plt
 # =========================
 # Embeddings
 # =========================
@@ -110,6 +111,62 @@ class _ConvBlock(nn.Module):
         return self.net(x)
 
 
+class SelfAttention2d(nn.Module):
+    """
+    Multi-head self-attention over spatial tokens for a (B,C,H,W) feature map.
+    Kept minimal: GroupNorm + 1x1 QKV + SDPA (with a safe fallback).
+    """
+
+    def __init__(self, ch: int, num_heads: int = 4) -> None:
+        super().__init__()
+        if ch % num_heads != 0:
+            raise ValueError(f"ch ({ch}) must be divisible by num_heads ({num_heads})")
+
+        self.ch = int(ch)
+        self.num_heads = int(num_heads)
+        self.head_dim = self.ch // self.num_heads
+
+        g = _gn_groups(self.ch)
+        self.norm = nn.GroupNorm(num_groups=g, num_channels=self.ch)
+
+        # 1x1 convs are the usual “linear” projections in CNN land
+        self.qkv = nn.Conv2d(self.ch, 3 * self.ch, kernel_size=1, padding=0)
+        self.proj = nn.Conv2d(self.ch, self.ch, kernel_size=1, padding=0)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        """
+        x: [B, C, H, W] -> [B, C, H, W]
+        """
+        x_in = x
+        B, C, H, W = x.shape
+        N = H * W
+
+        x = self.norm(x)
+        qkv = self.qkv(x)  # [B, 3C, H, W]
+        q, k, v = torch.chunk(qkv, 3, dim=1)
+
+        # [B, C, H, W] -> [B, heads, N, head_dim]
+        q = q.view(B, self.num_heads, self.head_dim, N).transpose(2, 3)
+        k = k.view(B, self.num_heads, self.head_dim, N).transpose(2, 3)
+        v = v.view(B, self.num_heads, self.head_dim, N).transpose(2, 3)
+
+        # PyTorch 2.x: fast, stable scaled dot-product attention
+        if hasattr(F, "scaled_dot_product_attention"):
+            y = F.scaled_dot_product_attention(q, k, v)  # [B, heads, N, head_dim]
+        else:
+            # Fallback: manual attention
+            scale = 1.0 / math.sqrt(self.head_dim)
+            attn = (q * scale) @ k.transpose(-2, -1)      # [B, heads, N, N]
+            attn = attn.softmax(dim=-1)
+            y = attn @ v                                  # [B, heads, N, head_dim]
+
+        # [B, heads, N, head_dim] -> [B, C, H, W]
+        y = y.transpose(2, 3).contiguous().view(B, C, H, W)
+        y = self.proj(y)
+
+        return x_in + y
+
+
 class CondUNetTiny(nn.Module):
     """
     Tiny U-Net predicting eps_hat = εθ(x_t, t, c).
@@ -154,6 +211,7 @@ class CondUNetTiny(nn.Module):
 
         # Bottleneck
         self.mid = _ConvBlock(base_ch * 2, base_ch * 2)
+        self.attn = SelfAttention2d(base_ch * 2, num_heads=4)
 
         # Up (nearest + conv to reduce checkerboards)
         self.us2 = nn.Upsample(scale_factor=2, mode="bilinear", align_corners=False)
@@ -193,6 +251,7 @@ class CondUNetTiny(nn.Module):
         h = self.ds2(h2)     # [B, 2*base_ch, H/4, W/4]
 
         h = self.mid(h)      # [B, 2*base_ch, H/4, W/4]
+        h = self.attn(h)     # global context at low-res
 
         h = self.us2(h)
         h = self.us2_conv(h)
@@ -237,6 +296,63 @@ class VPSDE:
     def sigma(self, t: torch.Tensor) -> torch.Tensor:
         a = self.alpha(t)
         return torch.sqrt(torch.clamp(1.0 - a * a, min=1e-8))
+
+
+@torch.no_grad()
+def save_sde_samples(
+    model: CondUNetTiny,
+    sde: VPSDE,
+    out_path: str,
+    device: torch.device,
+    n: int = 36,
+    theta_max: float = math.pi / 3.0,
+    steps: int = 200,
+    cfg: float = 0.0,
+    t_end: float = 1e-3,
+    sampler: str = "ode",   # "ode" or "sde"
+) -> None:
+    """Save a 6x6 grid: cycle lattice types, sweep theta in [0, pi/3]."""
+    model.eval()
+
+    y_cat = torch.tensor([i % model.n_types for i in range(n)], device=device, dtype=torch.int64)
+    thetas = torch.linspace(0.0, theta_max, steps=n, device=device)
+
+    y_cont = torch.zeros((n, model.y_cont_dim), device=device)
+    y_cont[:, 1] = thetas
+
+    if sampler == "ode":
+        x = sample_probability_flow_ode(
+            model=model,
+            sde=sde,
+            y_cat=y_cat,
+            y_cont=y_cont,
+            img_shape=(n, 1, 64, 64),
+            n_steps=steps,
+            guidance_scale=cfg,
+            t_end=t_end,
+        )
+    elif sampler == "sde":
+        x = sample_reverse_sde_euler_maruyama(
+            model=model,
+            sde=sde,
+            y_cat=y_cat,
+            y_cont=y_cont,
+            img_shape=(n, 1, 64, 64),
+            n_steps=steps,
+            guidance_scale=cfg,
+            t_end=t_end,
+        )
+    else:
+        raise ValueError(f"Unknown sampler='{sampler}'. Use 'ode' or 'sde'.")
+
+    fig, axes = plt.subplots(6, 6, figsize=(6, 6))
+    fig.suptitle(f"{sampler} | steps={steps} | cfg={cfg:.2f} | t_end={t_end:g}", fontsize=10)
+    for i, ax in enumerate(axes.flat):
+        ax.imshow(x[i, 0].cpu(), cmap="gray", vmin=0.0, vmax=1.0)
+        ax.axis("off")
+    fig.tight_layout()
+    fig.savefig(out_path, dpi=200)
+    plt.close(fig)
 
 
 def diffusion_loss_eps(
@@ -387,3 +503,67 @@ def sample_probability_flow_ode(
     x0 = (x0_hat + 1.0) * 0.5
     return x0.clamp(0.0, 1.0)
 
+
+@torch.no_grad()
+def sample_reverse_sde_euler_maruyama(
+    model: CondUNetTiny,
+    sde: VPSDE,
+    y_cat: torch.Tensor,
+    y_cont: torch.Tensor,
+    img_shape: Tuple[int, int, int, int],
+    n_steps: int = 200,
+    guidance_scale: float = 0.0,
+    t_end: float = 1e-3,
+) -> torch.Tensor:
+    """
+    Stochastic sampler: reverse-time SDE via Euler–Maruyama.
+
+    Reverse SDE for VP:
+        dx = [f(x,t) - g(t)^2 * score(x,t)] dt + g(t) dW
+    where f(x,t) = -0.5 beta(t) x, g(t)=sqrt(beta(t)),
+    and score ≈ -eps_hat / sigma(t) for eps-prediction training.
+
+    We integrate from t=1 -> t_end using a decreasing time grid (dt < 0).
+    """
+    device = y_cat.device
+    B, C, H, W = img_shape
+    assert C == 1
+
+    t_end = float(t_end)
+    if not (0.0 < t_end < 1.0):
+        raise ValueError(f"t_end must be in (0,1), got {t_end}")
+
+    # Model lives in [-1,1] space; start from standard normal there.
+    x = torch.randn((B, C, H, W), device=device)
+
+    # Same quadratic grid you use for the ODE: more steps near stiff region (t_end).
+    u = torch.linspace(0.0, 1.0, n_steps + 1, device=device)
+    ts = t_end + (1.0 - t_end) * (1.0 - u) ** 2  # ts[0]=1, ts[-1]=t_end
+
+    for i in range(n_steps):
+        t = ts[i].expand(B)
+        t_next = ts[i + 1].expand(B)
+        dt = (t_next - t).view(B, 1, 1, 1)  # negative
+
+        beta_t = sde.beta(t).view(B, 1, 1, 1)
+        sigma_t = sde.sigma(t).view(B, 1, 1, 1)
+        g = torch.sqrt(beta_t)
+
+        eps_hat = predict_eps_cfg(model, x, t, y_cat, y_cont, guidance_scale=guidance_scale)
+        score = -eps_hat / sigma_t
+
+        # reverse-time drift: f - g^2 * score
+        drift = (-0.5 * beta_t * x) - (beta_t * score)
+
+        z = torch.randn_like(x)
+        x = x + drift * dt + g * torch.sqrt(torch.abs(dt)) * z
+
+    # x is now at t_end; project to x0 (same as ODE version)
+    t_final = ts[-1].expand(B)
+    a = sde.alpha(t_final).view(B, 1, 1, 1)
+    s = sde.sigma(t_final).view(B, 1, 1, 1)
+    eps_hat = predict_eps_cfg(model, x, t_final, y_cat, y_cont, guidance_scale=guidance_scale)
+    x0_hat = (x - s * eps_hat) / torch.clamp(a, min=1e-6)
+
+    x0 = (x0_hat + 1.0) * 0.5
+    return x0.clamp(0.0, 1.0)
