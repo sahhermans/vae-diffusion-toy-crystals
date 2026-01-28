@@ -12,10 +12,9 @@ A) **VAE pipeline (with two priors)**
 
 B) **Direct diffusion pipeline**
 - A VP-SDE score model trained directly on images (no VAE), sampled with probability-flow ODE or reverse-SDE.
-
-Approach B follows standard diffusion / SDE notation as used in MIT’s diffusion course materials: <br>
-**MIT 6.S184: Generative AI with Stochastic Differential Equations** <br>
-Course site: https://diffusion.csail.mit.edu/2025/
+- Followed standard diffusion / SDE notation as used in MIT’s diffusion course materials: <br>
+  **MIT 6.S184: Generative AI with Stochastic Differential Equations** <br>
+  Course site: https://diffusion.csail.mit.edu/2025/
 
 ---
 
