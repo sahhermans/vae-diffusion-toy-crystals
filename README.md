@@ -118,12 +118,3 @@ python scripts/train_sde_score_model.py --data-path data/toycrystals_train_roton
 # 5) sample VP-SDE (settings used for the final grid)
 python scripts/sample_sde_score_model.py --device cuda --out-dir runs/sde_score/<run_dir_or_checkpoint_dir> --ckpt last --steps 300 --cfg 1.5 --t-end 0.005 --sampler sde --use-ema 1 --n 36
 ```
-
----
-
-## Repo layout
-
-- `src/toycrystals/…` — dataset + models
-- `scripts/…` — training/sampling entry points
-- `assets/…` — figures committed to git
-- `data/`, `checkpoints/`, `results/`, `runs/` — generated artefacts (recommended to keep out of git)
