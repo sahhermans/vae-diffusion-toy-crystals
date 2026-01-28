@@ -85,17 +85,6 @@ This approach trains directly on images (no VAE). It supports:
 - sampler = reverse-SDE (Euler–Maruyama)
 - EMA enabled
 
----
-
-## Repo layout
-
-- src/toycrystals/…  — dataset + models
-- scripts/…          — training/sampling entry points
-- assets/…           — figures committed to git
-- data/, checkpoints/, results/, runs/ — generated artefacts (recommended to keep out of git)
-
----
-
 ## Quickstart (commands)
 
 ### Install
